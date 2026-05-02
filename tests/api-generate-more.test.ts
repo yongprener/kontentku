@@ -3,9 +3,27 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { apiFailureResponseSchema } from '@/lib/api/contracts';
 import { POST as generateMorePOST } from '@/app/api/generate-more/route';
 import { POST as generatePOST } from '@/app/api/generate/route';
+import { POST as approvePOST } from '@/app/api/snapshots/[id]/approve/route';
+import { POST as scrapePOST } from '@/app/api/scrape/route';
 import { resetGenerationEngine } from '@/lib/generation/engine-v1';
+import { resetReviewFlowStore } from '@/lib/review-flow-store';
+
+const routeContext = (id: string) => ({
+  params: Promise.resolve({ id }),
+});
 
 const approveSnapshotForMore = async (snapshotId: string): Promise<void> => {
+  await scrapePOST(
+    new Request('http://localhost/api/scrape', {
+      method: 'POST',
+      body: JSON.stringify({
+        url: 'https://vt.tokopedia.com/t/xxxxx',
+      }),
+    }),
+  );
+
+  await approvePOST(new Request(`http://localhost/api/snapshots/${snapshotId}/approve`), routeContext(snapshotId));
+
   await generatePOST(
     new Request('http://localhost/api/generate', {
       method: 'POST',
@@ -22,16 +40,27 @@ const approveSnapshotForMore = async (snapshotId: string): Promise<void> => {
 describe('POST /api/generate-more', () => {
   beforeEach(() => {
     resetGenerationEngine();
+    resetReviewFlowStore();
   });
 
   it('returns a structured summary for approved snapshots', async () => {
-    await approveSnapshotForMore('snapshot_1');
+    const scrapeResponse = await scrapePOST(
+      new Request('http://localhost/api/scrape', {
+        method: 'POST',
+        body: JSON.stringify({ url: 'https://vt.tokopedia.com/t/xxxxx' }),
+      }),
+    );
+
+    const scraped = await scrapeResponse.json();
+    const snapshotId = scraped.snapshot.id as string;
+
+    await approveSnapshotForMore(snapshotId);
 
     const response = await generateMorePOST(
       new Request('http://localhost/api/generate-more', {
         method: 'POST',
         body: JSON.stringify({
-          snapshotId: 'snapshot_1',
+          snapshotId,
           contentCount: 5,
         }),
       }),
@@ -42,8 +71,8 @@ describe('POST /api/generate-more', () => {
       ok: true,
       endpoint: '/api/generate-more',
       job: {
-        id: 'generation-snapshot_1-002',
-        snapshotId: 'snapshot_1',
+        id: `generation-${snapshotId}-002`,
+        snapshotId,
         requestedCount: 5,
         type: 'generate_more',
         status: 'partial_failed',
@@ -61,13 +90,23 @@ describe('POST /api/generate-more', () => {
   });
 
   it('blocks exact duplicates on repeat requests', async () => {
-    await approveSnapshotForMore('snapshot_1');
+    const scrapeResponse = await scrapePOST(
+      new Request('http://localhost/api/scrape', {
+        method: 'POST',
+        body: JSON.stringify({ url: 'https://vt.tokopedia.com/t/xxxxx' }),
+      }),
+    );
+
+    const scraped = await scrapeResponse.json();
+    const snapshotId = scraped.snapshot.id as string;
+
+    await approveSnapshotForMore(snapshotId);
 
     await generateMorePOST(
       new Request('http://localhost/api/generate-more', {
         method: 'POST',
         body: JSON.stringify({
-          snapshotId: 'snapshot_1',
+          snapshotId,
           contentCount: 2,
         }),
       }),
@@ -77,7 +116,7 @@ describe('POST /api/generate-more', () => {
       new Request('http://localhost/api/generate-more', {
         method: 'POST',
         body: JSON.stringify({
-          snapshotId: 'snapshot_1',
+          snapshotId,
           contentCount: 2,
         }),
       }),
