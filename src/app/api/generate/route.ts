@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 
 import { apiEndpointContracts, apiRoutePaths, createApiFailureResponse } from '@/lib/api/contracts';
 import { generateRequestSchema } from '@/lib/domain';
+import { submitGenerationJob } from '@/lib/generation/engine-v1';
 
 export async function POST(request: Request) {
   const body = await request.json().catch(() => null);
@@ -14,8 +15,15 @@ export async function POST(request: Request) {
     );
   }
 
+  const { job, summary } = submitGenerationJob(parsed.data);
+
   return NextResponse.json(
-    createApiFailureResponse(apiRoutePaths.generate, apiEndpointContracts.generate.failureCode, 'Generation pipeline is not wired yet.'),
-    { status: 501 },
+    {
+      ok: true,
+      endpoint: apiRoutePaths.generate,
+      job,
+      summary,
+    },
+    { status: 200 },
   );
 }
