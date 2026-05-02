@@ -1,6 +1,9 @@
 'use client';
 
-import { useMemo, useState, type CSSProperties } from 'react';
+import { useMemo, useRef, useState, type CSSProperties } from 'react';
+
+import { apiRoutePaths } from '@/lib/api/contracts';
+import type { MediaAsset, ProductSnapshot } from '@/lib/domain/contracts';
 
 type MediaItem = {
   id: string;
@@ -43,6 +46,10 @@ const primaryButtonStyle: CSSProperties = {
   color: '#d3f0ff',
 };
 
+function buildRoutePath(template: string, id: string): string {
+  return template.replace(':id', encodeURIComponent(id));
+}
+
 function normalizeUrl(rawUrl: string): string {
   const trimmed = rawUrl.trim();
 
@@ -53,51 +60,13 @@ function normalizeUrl(rawUrl: string): string {
   return /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
 }
 
-function deriveDraftFromUrl(rawUrl: string): { title: string; description: string; media: MediaItem[] } {
-  const normalized = normalizeUrl(rawUrl);
-
-  if (!normalized) {
-    return {
-      title: '',
-      description: '',
-      media: [],
-    };
-  }
-
-  let host = 'product';
-
-  try {
-    host = new URL(normalized).hostname.replace(/^www\./, '').split('.')[0] || 'product';
-  } catch {
-    host = 'product';
-  }
-
-  const displayHost = host.charAt(0).toUpperCase() + host.slice(1);
-
-  return {
-    title: `${displayHost} spotlight bundle`,
-    description: `High-intent product snapshot from ${normalized}. Review, curate media, and approve before generation.`,
-    media: [
-      {
-        id: 'media-1',
-        kind: 'Image',
-        label: `${displayHost} hero angle`,
-        source: 'Scraped asset',
-      },
-      {
-        id: 'media-2',
-        kind: 'Image',
-        label: `${displayHost} detail shot`,
-        source: 'Scraped asset',
-      },
-      {
-        id: 'media-3',
-        kind: 'Video',
-        label: `${displayHost} lifestyle clip`,
-        source: 'Scraped asset',
-      },
-    ],
-  };
+function toMediaItems(media: readonly MediaAsset[]): MediaItem[] {
+  return media.map((asset, index) => ({
+    id: asset.id,
+    kind: asset.urlOrPath.toLowerCase().endsWith('.mp4') ? 'Video' : 'Image',
+    label: `${asset.sourceType === 'scraped' ? 'Scraped' : 'Uploaded'} asset ${index + 1}`,
+    source: asset.urlOrPath,
+  }));
 }
 
 function buildVariant(title: string, description: string, index: number): GeneratedVariant {
@@ -111,71 +80,253 @@ function buildVariant(title: string, description: string, index: number): Genera
   };
 }
 
+function buildVariants(title: string, description: string, startIndex: number, count: number): GeneratedVariant[] {
+  return Array.from({ length: count }, (_, offset) => buildVariant(title, description, startIndex + offset));
+}
+
+function readErrorMessage(payload: unknown, fallback: string): string {
+  if (typeof payload === 'object' && payload !== null && 'message' in payload && typeof payload.message === 'string') {
+    return payload.message;
+  }
+
+  return fallback;
+}
+
+async function readJson(response: Response): Promise<unknown> {
+  return response.json().catch(() => null);
+}
+
 export function ReviewGate() {
   const [productUrl, setProductUrl] = useState('');
+  const [snapshot, setSnapshot] = useState<ProductSnapshot | null>(null);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [mediaItems, setMediaItems] = useState<MediaItem[]>([]);
-  const [isApproved, setIsApproved] = useState(false);
-  const [hasScraped, setHasScraped] = useState(false);
+  const [isBusy, setIsBusy] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [statusMessage, setStatusMessage] = useState('No snapshot yet');
   const [generated, setGenerated] = useState<GeneratedVariant[]>([]);
+  const nextBatchSizeRef = useRef(1);
 
-  const canScrape = productUrl.trim().length > 0;
-  const canApprove = hasScraped && title.trim().length > 0 && description.trim().length > 0;
-  const canGenerate = isApproved;
+  const canScrape = productUrl.trim().length > 0 && !isBusy;
+  const canApprove = snapshot?.status === 'draft' && title.trim().length > 0 && description.trim().length > 0 && !isBusy;
+  const canGenerate = snapshot?.status === 'approved' && !isBusy;
 
   const approvalStateLabel = useMemo(() => {
-    if (isApproved) {
+    if (snapshot?.status === 'approved') {
       return 'Approved snapshot';
     }
 
-    if (hasScraped) {
+    if (snapshot) {
       return 'Awaiting approval';
     }
 
     return 'No snapshot yet';
-  }, [hasScraped, isApproved]);
+  }, [snapshot]);
 
-  const handleScrape = () => {
-    const draft = deriveDraftFromUrl(productUrl);
-
-    setTitle(draft.title);
-    setDescription(draft.description);
-    setMediaItems(draft.media);
-    setIsApproved(false);
-    setGenerated([]);
-    setHasScraped(true);
+  const applySnapshotResponse = (nextSnapshot: ProductSnapshot): void => {
+    setSnapshot(nextSnapshot);
+    setTitle(nextSnapshot.title);
+    setDescription(nextSnapshot.description);
+    setMediaItems(toMediaItems(nextSnapshot.media));
   };
 
-  const handleEditTitle = (nextTitle: string) => {
-    setTitle(nextTitle);
-    setIsApproved(false);
+  const persistDraft = async (overrides?: { title?: string; description?: string; media?: MediaItem[] }): Promise<boolean> => {
+    if (snapshot === null || snapshot.status === 'approved') {
+      return false;
+    }
+
+    try {
+      const response = await fetch(buildRoutePath(apiRoutePaths.snapshotById, snapshot.id), {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          title: overrides?.title ?? title,
+          description: overrides?.description ?? description,
+          media:
+            overrides?.media?.map((asset) => ({
+              id: asset.id,
+              snapshotId: snapshot.id,
+              sourceType: 'scraped',
+              urlOrPath: asset.source,
+              isActive: true,
+            })) ?? snapshot.media,
+        }),
+      });
+
+      const payload = await readJson(response);
+
+      if (!response.ok) {
+        setErrorMessage(readErrorMessage(payload, 'Failed to save snapshot changes.'));
+        return false;
+      }
+
+      applySnapshotResponse((payload as { snapshot: ProductSnapshot }).snapshot);
+      setStatusMessage('Draft changes saved');
+
+      return true;
+    } catch {
+      setErrorMessage('Failed to save snapshot changes.');
+      return false;
+    }
   };
 
-  const handleEditDescription = (nextDescription: string) => {
-    setDescription(nextDescription);
-    setIsApproved(false);
+  const handleScrape = async () => {
+    setIsBusy(true);
+    setErrorMessage(null);
+
+    try {
+      const normalizedUrl = normalizeUrl(productUrl);
+
+      const response = await fetch(apiRoutePaths.scrape, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ url: normalizedUrl }),
+      });
+
+      const payload = await readJson(response);
+
+      if (!response.ok) {
+        setErrorMessage(readErrorMessage(payload, 'Scrape failed.'));
+        return;
+      }
+
+      const nextSnapshot = (payload as { snapshot: ProductSnapshot }).snapshot;
+
+      applySnapshotResponse(nextSnapshot);
+      setGenerated([]);
+      nextBatchSizeRef.current = 1;
+      setStatusMessage(`Loaded snapshot ${nextSnapshot.id}`);
+    } catch {
+      setErrorMessage('Scrape failed.');
+    } finally {
+      setIsBusy(false);
+    }
   };
 
-  const handleRemoveMedia = (id: string) => {
-    setMediaItems((current) => current.filter((item) => item.id !== id));
-    setIsApproved(false);
-  };
-
-  const handleApprove = () => {
-    if (!canApprove) {
+  const handleApprove = async () => {
+    if (!(await persistDraft())) {
       return;
     }
 
-    setIsApproved(true);
-  };
-
-  const handleGenerate = () => {
-    if (!canGenerate) {
+    if (snapshot === null) {
       return;
     }
 
-    setGenerated((current) => [...current, buildVariant(title, description, current.length + 1)]);
+    setIsBusy(true);
+    setErrorMessage(null);
+
+    try {
+      const response = await fetch(buildRoutePath(apiRoutePaths.approveSnapshotById, snapshot.id), {
+        method: 'POST',
+      });
+
+      const payload = await readJson(response);
+
+      if (!response.ok) {
+        setErrorMessage(readErrorMessage(payload, 'Approval failed.'));
+        return;
+      }
+
+      applySnapshotResponse((payload as { snapshot: ProductSnapshot }).snapshot);
+      setStatusMessage('Snapshot approved');
+    } catch {
+      setErrorMessage('Approval failed.');
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
+  const handleGenerate = async () => {
+    if (snapshot === null || snapshot.status !== 'approved') {
+      return;
+    }
+
+    setIsBusy(true);
+    setErrorMessage(null);
+
+    try {
+      const requestedCount = nextBatchSizeRef.current;
+      const response = await fetch(apiRoutePaths.generate, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          snapshotId: snapshot.id,
+          contentCount: requestedCount,
+          duration: '15s',
+          language: 'en',
+        }),
+      });
+
+      const payload = await readJson(response);
+
+      if (!response.ok) {
+        setErrorMessage(readErrorMessage(payload, 'Generate failed.'));
+        return;
+      }
+
+      const summary = (payload as { summary: { successCount: number } }).summary;
+
+      setGenerated((current) => [...current, ...buildVariants(title, description, current.length + 1, summary.successCount)]);
+      nextBatchSizeRef.current = requestedCount + 1;
+      setStatusMessage(`Generated ${summary.successCount} approved-content variant(s)`);
+    } catch {
+      setErrorMessage('Generate failed.');
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
+  const handleGenerateMore = async () => {
+    if (snapshot === null || snapshot.status !== 'approved') {
+      return;
+    }
+
+    setIsBusy(true);
+    setErrorMessage(null);
+
+    try {
+      const requestedCount = nextBatchSizeRef.current;
+      const response = await fetch(apiRoutePaths.generateMore, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          snapshotId: snapshot.id,
+          contentCount: requestedCount,
+        }),
+      });
+
+      const payload = await readJson(response);
+
+      if (!response.ok) {
+        setErrorMessage(readErrorMessage(payload, 'Generate more failed.'));
+        return;
+      }
+
+      const summary = (payload as { summary: { successCount: number } }).summary;
+
+      setGenerated((current) => [...current, ...buildVariants(title, description, current.length + 1, summary.successCount)]);
+      nextBatchSizeRef.current = requestedCount + 1;
+      setStatusMessage(`Generated more: ${summary.successCount} accepted`);
+    } catch {
+      setErrorMessage('Generate more failed.');
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
+  const handleRemoveMedia = async (id: string) => {
+    const nextMedia = mediaItems.filter((item) => item.id !== id);
+    setMediaItems(nextMedia);
+    await persistDraft({ media: nextMedia });
   };
 
   return (
@@ -188,8 +339,7 @@ export function ReviewGate() {
               Review, curate, and approve before content generation.
             </h1>
             <p className="subtitle" style={{ maxWidth: '58ch' }}>
-              This local-only flow mirrors the dashboard gate: scrape from URL, edit snapshot fields, prune media,
-              approve, then unlock generation.
+              URL → scrape → review/edit → approve snapshot → generate → generate more.
             </p>
           </div>
           <div className="pill" style={{ alignSelf: 'start' }}>
@@ -210,12 +360,14 @@ export function ReviewGate() {
                   name="product-url"
                   value={productUrl}
                   onChange={(event) => setProductUrl(event.target.value)}
-                  placeholder="https://brand.com/product"
+                  placeholder="https://vt.tokopedia.com/t/xxxxx"
+                  type="url"
                   style={{ ...fieldStyle, flex: '1 1 380px', minWidth: 0 }}
+                  disabled={isBusy}
                 />
                 <button
                   type="button"
-                  onClick={handleScrape}
+                  onClick={() => void handleScrape()}
                   disabled={!canScrape}
                   style={{ ...primaryButtonStyle, opacity: canScrape ? 1 : 0.48, cursor: canScrape ? 'pointer' : 'not-allowed' }}
                 >
@@ -232,9 +384,11 @@ export function ReviewGate() {
                 id="draft-title"
                 name="draft-title"
                 value={title}
-                onChange={(event) => handleEditTitle(event.target.value)}
+                onChange={(event) => setTitle(event.target.value)}
+                onBlur={() => void persistDraft({ title })}
                 placeholder="Scraped title appears here"
                 style={fieldStyle}
+                disabled={snapshot?.status === 'approved' || isBusy}
               />
             </div>
 
@@ -246,10 +400,12 @@ export function ReviewGate() {
                 id="draft-description"
                 name="draft-description"
                 value={description}
-                onChange={(event) => handleEditDescription(event.target.value)}
+                onChange={(event) => setDescription(event.target.value)}
+                onBlur={() => void persistDraft({ description })}
                 rows={4}
                 placeholder="Scraped description appears here"
                 style={{ ...fieldStyle, resize: 'vertical', minHeight: 110 }}
+                disabled={snapshot?.status === 'approved' || isBusy}
               />
             </div>
 
@@ -269,7 +425,8 @@ export function ReviewGate() {
                       </div>
                       <button
                         type="button"
-                        onClick={() => handleRemoveMedia(item.id)}
+                        onClick={() => void handleRemoveMedia(item.id)}
+                        disabled={snapshot?.status === 'approved' || isBusy}
                         style={{
                           ...actionButtonStyle,
                           padding: '8px 10px',
@@ -277,6 +434,7 @@ export function ReviewGate() {
                           background: 'rgba(248, 113, 113, 0.12)',
                           border: '1px solid rgba(248, 113, 113, 0.34)',
                           color: '#fecaca',
+                          opacity: snapshot?.status === 'approved' || isBusy ? 0.6 : 1,
                         }}
                       >
                         Remove
@@ -287,7 +445,7 @@ export function ReviewGate() {
                   <li className="list-item">
                     <div>
                       <strong>No media selected</strong>
-                      <span>Scrape a product URL to load assets, then curate the list.</span>
+                      <span>Scrape https://vt.tokopedia.com/t/xxxxx to load assets, then curate the list.</span>
                     </div>
                   </li>
                 )}
@@ -298,14 +456,14 @@ export function ReviewGate() {
           <aside className="card" style={{ display: 'grid', gap: 14 }}>
             <div className="stack" style={{ gap: 6 }}>
               <span className="eyebrow">Workflow actions</span>
-              <p>
-                Approve to unlock generation. Any title, description, or media edit returns the gate to pending.
-              </p>
+              <p>Approve to unlock generation. Any title, description, or media edit returns the gate to pending.</p>
+              <p style={{ color: 'var(--muted)', margin: 0 }}>{statusMessage}</p>
+              {errorMessage ? <p style={{ color: '#fecaca', margin: 0 }}>{errorMessage}</p> : null}
             </div>
 
             <button
               type="button"
-              onClick={handleApprove}
+              onClick={() => void handleApprove()}
               disabled={!canApprove}
               style={{
                 ...primaryButtonStyle,
@@ -318,7 +476,7 @@ export function ReviewGate() {
 
             <button
               type="button"
-              onClick={handleGenerate}
+              onClick={() => void handleGenerate()}
               disabled={!canGenerate}
               style={{
                 ...actionButtonStyle,
@@ -330,7 +488,7 @@ export function ReviewGate() {
             </button>
 
             {generated.length > 0 ? (
-              <button type="button" onClick={handleGenerate} style={actionButtonStyle}>
+              <button type="button" onClick={() => void handleGenerateMore()} style={actionButtonStyle} disabled={!canGenerate}>
                 Generate More
               </button>
             ) : null}
