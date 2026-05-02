@@ -125,3 +125,14 @@ export interface GenerationSummary {
   failedCount: number;
   failureReasons: readonly string[];
 }
+
+export interface GenerateMoreSummary extends GenerationSummary {
+  exactDuplicateCount: number;
+  similarityRetryCount: number;
+  similarityRetryLimit: number;
+}
+
+export interface GenerateMoreResponse {
+  job: GenerationJob;
+  summary: GenerateMoreSummary;
+}

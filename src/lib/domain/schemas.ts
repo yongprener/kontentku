@@ -105,6 +105,28 @@ export const approveSnapshotResponseSchema = z
 
 export const contentCountSchema = z.number().int().min(1).max(MAX_CONTENT_PER_BATCH);
 
+export const generationSummarySchema = z
+  .object({
+    requestedCount: contentCountSchema,
+    successCount: z.number().int().min(0),
+    failedCount: z.number().int().min(0),
+    failureReasons: z.array(nonEmptyText),
+  })
+  .strict();
+
+export const generateMoreSummarySchema = generationSummarySchema.extend({
+  exactDuplicateCount: z.number().int().min(0),
+  similarityRetryCount: z.number().int().min(0),
+  similarityRetryLimit: z.literal(2),
+});
+
+export const generateMoreResponseSchema = z
+  .object({
+    job: generationJobSchema,
+    summary: generateMoreSummarySchema,
+  })
+  .strict();
+
 export const generateRequestSchema = z
   .object({
     snapshotId: nonEmptyText,
