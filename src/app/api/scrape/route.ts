@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 
 import { createApiFailureResponse, apiEndpointContracts, apiRoutePaths } from '@/lib/api/contracts';
 import { scrapeRequestSchema } from '@/lib/domain';
+import { scrapeSnapshot } from '@/lib/review-flow-store';
 
 export async function POST(request: Request) {
   const body = await request.json().catch(() => null);
@@ -14,8 +15,14 @@ export async function POST(request: Request) {
     );
   }
 
+  const snapshot = scrapeSnapshot(parsed.data.url);
+
   return NextResponse.json(
-    createApiFailureResponse(apiRoutePaths.scrape, apiEndpointContracts.scrape.failureCode, 'Scrape pipeline is not wired yet.'),
-    { status: 501 },
+    {
+      ok: true,
+      endpoint: apiRoutePaths.scrape,
+      snapshot,
+    },
+    { status: 200 },
   );
 }
