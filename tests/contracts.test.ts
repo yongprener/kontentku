@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest';
 import {
   apiErrorCodes,
   contentVariantSchema,
+  generateMoreResponseSchema,
+  generateMoreSummarySchema,
   generateMoreRequestSchema,
   generateRequestSchema,
   productSnapshotSchema,
@@ -85,6 +87,39 @@ describe('domain contracts', () => {
       snapshotId: 'snapshot_1',
       contentCount: 2,
     });
+
+    expect(
+      generateMoreSummarySchema.parse({
+        requestedCount: 2,
+        successCount: 1,
+        failedCount: 1,
+        failureReasons: ['Generated item 2 exceeded the similarity retry limit after 2 retries.'],
+        exactDuplicateCount: 0,
+        similarityRetryCount: 2,
+        similarityRetryLimit: 2,
+      }),
+    ).toMatchObject({ similarityRetryLimit: 2 });
+
+    expect(
+      generateMoreResponseSchema.parse({
+        job: {
+          id: 'generation-snapshot_1-001',
+          snapshotId: 'snapshot_1',
+          requestedCount: 2,
+          type: 'generate_more',
+          status: 'partial_failed',
+        },
+        summary: {
+          requestedCount: 2,
+          successCount: 1,
+          failedCount: 1,
+          failureReasons: ['Generated item 2 exceeded the similarity retry limit after 2 retries.'],
+          exactDuplicateCount: 0,
+          similarityRetryCount: 2,
+          similarityRetryLimit: 2,
+        },
+      }),
+    ).toMatchObject({ job: { type: 'generate_more' } });
 
     expect(apiErrorCodes).toEqual([
       'SNAPSHOT_NOT_APPROVED',
