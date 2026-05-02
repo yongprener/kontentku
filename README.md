@@ -22,5 +22,5 @@ npm run typecheck
 - Next.js App Router + TypeScript bootstrap
 - Minimal dashboard shell
 - Strict domain contracts for the approved product flow
-- SQLite-ready persistence scaffolding
+- DB-neutral persistence scaffolding prepared for Postgres-backed storage
 - Automated contract tests
