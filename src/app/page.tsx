@@ -1,5 +1,5 @@
-import { DashboardShell } from '@/components/dashboard-shell';
+import { ReviewGate } from '@/components/review-gate';
 
 export default function HomePage() {
-  return <DashboardShell />;
+  return <ReviewGate />;
 }
