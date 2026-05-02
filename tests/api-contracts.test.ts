@@ -23,6 +23,11 @@ describe('api contracts', () => {
       duration: '15s',
       language: 'id',
     })).toMatchObject({ contentCount: 5 });
+
+    expect(apiEndpointContracts.generateMore.requestSchema.parse({
+      snapshotId: 'snapshot_1',
+      contentCount: 2,
+    })).toMatchObject({ contentCount: 2 });
   });
 
   it('builds a valid failure response envelope', () => {
