@@ -24,3 +24,4 @@ npm run typecheck
 - Strict domain contracts for the approved product flow
 - DB-neutral persistence scaffolding prepared for Postgres-backed storage
 - Automated contract tests
+- Final QA/demo signoff pack in `docs/QA_DEMO_SIGNOFF_PACK.md`
