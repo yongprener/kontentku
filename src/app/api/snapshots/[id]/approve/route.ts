@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 
 import { apiEndpointContracts, apiRoutePaths, createApiFailureResponse } from '@/lib/api/contracts';
+import { approveSnapshot } from '@/lib/review-flow-store';
 
 type RouteContext = {
   params: Promise<{
@@ -18,8 +19,21 @@ export async function POST(_request: Request, context: RouteContext) {
     );
   }
 
+  const snapshot = approveSnapshot(id);
+
+  if (snapshot === null) {
+    return NextResponse.json(
+      createApiFailureResponse(apiRoutePaths.approveSnapshotById, apiEndpointContracts.approveSnapshot.failureCode, 'Snapshot not found.'),
+      { status: 404 },
+    );
+  }
+
   return NextResponse.json(
-    createApiFailureResponse(apiRoutePaths.approveSnapshotById, apiEndpointContracts.approveSnapshot.failureCode, 'Snapshot approval flow is not wired yet.'),
-    { status: 501 },
+    {
+      ok: true,
+      endpoint: apiRoutePaths.approveSnapshotById,
+      snapshot,
+    },
+    { status: 200 },
   );
 }
