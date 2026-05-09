@@ -1,0 +1,66 @@
+{
+  "validUrls": [
+    {
+      "id": "V-01",
+      "url": "https://vt.tokopedia.com/t/ZS9N3WDPgRU3X-WKUVc/",
+      "kind": "live"
+    },
+    {
+      "id": "V-02",
+      "url": "https://vt.tokopedia.com/t/ZS9N3Wu7DHBFj-sdhM0/",
+      "kind": "live"
+    },
+    {
+      "id": "V-03",
+      "url": "https://vt.tokopedia.com/t/ZS9N3WgNtWtVP-DGgic/",
+      "kind": "live"
+    },
+    {
+      "id": "V-04",
+      "url": "https://vt.tokopedia.com/t/ZS9N371ugjR34-uAx3f/",
+      "kind": "live"
+    },
+    {
+      "id": "V-05",
+      "url": "https://example.invalid/qa-placeholder-05",
+      "kind": "placeholder"
+    },
+    {
+      "id": "V-06",
+      "url": "https://example.invalid/qa-placeholder-06",
+      "kind": "placeholder"
+    },
+    {
+      "id": "V-07",
+      "url": "https://example.invalid/qa-placeholder-07",
+      "kind": "placeholder"
+    },
+    {
+      "id": "V-08",
+      "url": "https://example.invalid/qa-placeholder-08",
+      "kind": "placeholder"
+    },
+    {
+      "id": "V-09",
+      "url": "https://example.invalid/qa-placeholder-09",
+      "kind": "placeholder"
+    },
+    {
+      "id": "V-10",
+      "url": "https://example.invalid/qa-placeholder-10",
+      "kind": "placeholder"
+    }
+  ],
+  "failureScenarios": [
+    {
+      "id": "F-01",
+      "input": "inaccessible or malformed URL",
+      "expected": "SCRAPE_FAILED"
+    },
+    {
+      "id": "F-02",
+      "input": "draft snapshot generate attempt",
+      "expected": "SNAPSHOT_NOT_APPROVED"
+    }
+  ]
+}
